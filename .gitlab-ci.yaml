@@ -1,0 +1,12 @@
+stages:
+  - code_quality
+
+pre_commit:
+  stage: code_quality
+  image: python:3.11.4
+  script:
+    - pip install pre-commit
+    - pre-commit install
+    - pre-commit run --all-files
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master" && $CI_MERGE_REQUEST_TITLE !~ /^draft/i

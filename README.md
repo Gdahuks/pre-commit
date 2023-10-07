@@ -331,14 +331,109 @@ insecure_function(user_input)
 
 Dodajmy go do śledzenia przez git:
 ```bash
-git add .
+git add first_package/__init__.py .pre-commit-config.yaml
 ```
 
-Teraz gdy spróbujemy wykonać commit, powinien się on nie wykonać póki nie naprawimy błędów:
+Teraz gdy spróbujemy wykonać commit, powinien się on nie wykonać, póki nie naprawimy błędów:
 
 ```bash
 git commit -m "Test"
 git status
 ```
- 
 
+Dzięki takiej konfiguracji pre-commit narzędzia do statycznej analizy kodu zostaną uruchomione automatycznie przed każdym commitowaniem zmian, co pozwoli na wykrycie i naprawienie błędów oraz utrzymanie wysokiej jakości kodu w projekcie.
+
+Jeżeli chcielibyśmy wyłączyć pre-commit, możemy użyć flagi `--no-verify`:
+
+```bash
+git commit -m "Test" --no-verify
+```
+
+Możemy również przetestować, czy wszystko działa poprawnie, uruchamiając hook pre-commit ręcznie, bez próby commitowania zmian:
+
+```bash
+pre-commit run --all-files
+```
+
+Dostaniemy wtedy raport, który powinien być taki sam, jak przy próbie commitowania zmian.
+
+## Korzystanie z pipeline
+
+### Co to jest pipeline?
+
+Pipeline to automatyczny proces, który definiujemy w narzędziach do zarządzania kodem źródłowym, takich jak GitHub Actions, GitLab CI/CD lub Jenkins. Pipeline określa kroki i operacje, które mają być wykonywane automatycznie w odpowiedzi na określone zdarzenia, takie jak próba zmergowania brancha z głównym repozytorium.
+
+Pipeline może zawierać wiele kroków, które są wykonywane w określonej kolejności. Każdy krok może być skonfigurowany do wykonania określonych działań, takich jak uruchamianie testów, wdrażanie kodu na serwer produkcyjny, budowanie dokumentacji, analizowanie kodu, sprawdzanie zgodności z konwencjami i wiele innych.
+
+Pipeline jest ważnym narzędziem w procesie ciągłej integracji (CI) i ciągłego wdrażania (CD), ponieważ automatyzuje wiele operacji, które inaczej musiałyby być wykonywane ręcznie. Dzięki temu zapewnia spójność, niezawodność i efektywność procesu wytwarzania oprogramowania.
+
+### Konfiguracja
+
+Do konfiguracji można podejść na dwa sposoby:
+- wykorzystać skonfigurowane na lokalnym komputerze `pre-commit`
+- uruchamiać narzędzia bezpośrednio w pipeline (analogicznie jak w *Podstawy pracy z narzędziami do statycznej analizy kodu*)
+
+Osobiście korzystam z opcji pierwszej. Pomimo że wydaje się ona mniej poprawna (korzystamy z narzędzia, które powinno być uruchamiane przy commitowaniu), to zapewnia ona nam to, że testy które przejdą na lokalnym komputerze, tak samo zadziałają na pipeline (korzystamy z dokładnie tej samej konfiguracji).
+
+### Konfiguracja GitLab CI/CD
+
+Do pliku `.gitlab-ci.yml` dodajemy:
+```yaml
+stages:
+  - code_quality
+
+pre_commit:
+  stage: code_quality
+  image: python:3.11.4
+  script:
+    - pip install pre-commit
+    - pre-commit install
+    - pre-commit run --all-files
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master" && $CI_MERGE_REQUEST_TITLE !~ /^draft/i
+
+```
+
+W `stages` definiujemy etapy pipeline (w naszym wypadku wystarczy jeden). Później definiujemy job, a w nim do jakiego etapu (stage) należy, z jakiego obrazu chcemy skorzystać (w naszym wypadku debian wraz z pythonem w wersji 3.11.4 - [link](https://hub.docker.com/layers/library/python/3.11.4/images/sha256-35469d11bde33a2f1cc54c04f64451275e09985bebf23a101a51e28a1774f548?context=explore)), a następnie skrypty, jakie powinny się uruchomić. Na koniec definiujemy reguły, w których określamy, kiedy job ma się wykonać, w naszym przypadku:
+- podczas próby zmergowania branchy przy pomocy MR (merge request)/PR (pull request)
+- gdy branch, który chcemy zmergować to `master`
+- gdy tytuł MR nie zaczyna się od `draft`
+
+Domyślnie taki pipeline jest tylko informacyjny - jeżeli się nie powiedzie to nic się nie stanie. Możemy jednak w Settings -> Merge requests -> Merge checks zaznaczyć `Pipelines must succeed` i wtedy pipeline będzie blokował zmergowanie branchy, jeżeli się nie powiedzie.
+
+### Konfiguracja GitHub Actions
+
+Do pliku `.github/workflows/github_workflow.yaml` dodajemy:
+```yaml
+name: code_quality
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.11.4
+
+      - name: Install dependencies
+        run: |
+          pip install pre-commit
+          pre-commit install
+
+      - name: Run pre-commit
+        run: |
+          pre-commit run --all-files
+```
